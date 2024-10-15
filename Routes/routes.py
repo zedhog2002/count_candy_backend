@@ -1,0 +1,245 @@
+import pickle
+import numpy as np
+from skfuzzy import control as ctrl
+from fastapi import APIRouter, HTTPException
+from Config.database import user_registration_collection, user_profile_collection, quiz_collection, \
+    questions_collection, predicted_values_collection  # Updated collection names
+from bson import ObjectId
+import re
+import uuid
+
+router = APIRouter()
+
+# Regex patterns
+email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+password_regex = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
+
+
+# REGISTER
+@router.post("/register")
+async def post_user(user: dict):
+    # Validate email format
+    if not re.match(email_regex, user.get('email', '')):
+        raise HTTPException(status_code=400, detail="Invalid email format.")
+
+    # Validate password complexity
+    if not re.match(password_regex, user.get('password', '')):
+        raise HTTPException(status_code=400,
+                            detail="Password does not meet complexity requirements. It must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special symbol.")
+
+    # Check if passwords match
+    if user.get('password') != user.get('confirm_password'):
+        raise HTTPException(status_code=400, detail="Passwords do not match.")
+
+    # Check if the email is already in the database (ensuring uniqueness)
+    existing_user = user_registration_collection.find_one({"email": user.get("email")})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already exists. Please use a different email.")
+
+    # Generate a unique UID
+    uid = str(uuid.uuid4())
+
+    # Construct user data with uid
+    user_data = {
+        "uid": uid,
+        "username": user.get('username'),
+        "email": user.get('email'),
+        "password": user.get('password'),
+        "confirm_password": user.get('confirm_password')
+    }
+
+    # Insert the user data into the collection
+    user_registration_collection.insert_one(user_data)
+
+    return {"message": "User successfully registered!", "uid": uid}
+
+
+# LOGIN
+@router.post("/login")
+async def login_user(user: dict):
+    username = user.get("username")
+    password = user.get("password")
+
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required.")
+
+    db_user = user_registration_collection.find_one({"email": username}) or user_registration_collection.find_one(
+        {"username": username})
+
+    if db_user and db_user["password"] == password:
+        user_id = db_user["uid"]
+        return {"message": "Login successful!", "user_id": user_id}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid email or password.")
+
+
+# PROFILE
+@router.post("/profile")
+async def post_user_details(user: dict):
+    # Find user by email in the UserRegistrations collection
+    existing_user = user_registration_collection.find_one({"email": user.get("email")})
+
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found. Please register first.")
+
+    # Get the UID of the registered user
+    uid = existing_user.get("uid")
+
+    # Construct the profile data with the retrieved UID
+    profile_data = {
+        "uid": uid,
+        "child_name": user.get("child_name"),
+        "child_age": user.get("child_age"),
+        "child_gender": user.get("child_gender"),
+        "parent_name": user.get("parent_name"),
+        "parent_contact": user.get("parent_contact"),
+        "address": user.get("address"),
+        "preferred_subject": user.get("preferred_subject")
+    }
+
+    # Insert the profile data into the profile collection
+    user_profile_collection.insert_one(profile_data)
+
+    return {"message": "User profile created successfully!", "uid": uid}
+
+
+# SCORES
+@router.post("/score")
+async def post_user_score(data: dict):
+    uid = data.get("uid")
+    quiz_id = str(data.get("quiz_id"))
+
+    if not uid or not quiz_id:
+        raise HTTPException(status_code=400, detail="Missing 'uid' or 'quiz_id'.")
+
+    existing_user = quiz_collection.find_one({"uid": uid})
+
+    if not existing_user:
+        new_quiz_data = {
+            "uid": uid,
+            "quizzes": {
+                quiz_id: {
+                    "1": {
+                        "question1_id": data.get("question1_id"),
+                        "question2_id": data.get("question2_id"),
+                        "question3_id": data.get("question3_id"),
+                        "question4_id": data.get("question4_id"),
+                        "question5_id": data.get("question5_id"),
+                        "average_result": data.get("average_result")
+                    }
+                }
+            }
+        }
+        quiz_collection.insert_one(new_quiz_data)
+        return {"message": "First attempt for this quiz recorded!", "attempt_number": 1}
+
+    quizzes = existing_user.get("quizzes", {})
+    current_quiz = quizzes.get(quiz_id, {})
+
+    attempt_number = len(current_quiz) + 1
+
+    current_quiz[str(attempt_number)] = {
+        "question1_id": data.get("question1_id"),
+        "question2_id": data.get("question2_id"),
+        "question3_id": data.get("question3_id"),
+        "question4_id": data.get("question4_id"),
+        "question5_id": data.get("question5_id"),
+        "average_result": data.get("average_result")
+    }
+
+    quizzes[quiz_id] = current_quiz
+
+    quiz_collection.update_one(
+        {"uid": uid},
+        {"$set": {"quizzes": quizzes}}
+    )
+
+    return {"message": f"Attempt {attempt_number} for quiz {quiz_id} recorded!", "attempt_number": attempt_number}
+
+
+# PREDICTION
+with open('fuzzy_model.pkl', 'rb') as f:
+    fuzzy_ctrl = pickle.load(f)
+
+# Ensure that the loaded model is a ControlSystem
+if not isinstance(fuzzy_ctrl, ctrl.ControlSystem):
+    raise ValueError("Loaded object is not a valid ControlSystem instance.")
+
+def apply_fuzzy_logic(counting_input, color_input, calculation_input, fuzzy_ctrl):
+    simulator = ctrl.ControlSystemSimulation(fuzzy_ctrl)
+    simulator.input['Counting_Ability'] = np.mean(counting_input)
+    simulator.input['Color_Ability'] = np.mean(color_input)
+    simulator.input['Calculation_Ability'] = np.mean(calculation_input)
+    simulator.compute()
+
+    output_percentage = simulator.output.get('Percentage', None)
+    return output_percentage
+
+@router.post("/predict")
+async def predict_dyscalculia(data: dict):
+    uid = data.get("uid")
+
+    if not uid:
+        raise HTTPException(status_code=400, detail="Missing 'uid'.")
+
+    # Fetch the user data from the quiz collection
+    existing_user = quiz_collection.find_one({"uid": uid})
+
+    if not existing_user:
+        return {"message": "User not found", "result": 0}
+
+    # Check if quizzes 1, 2, and 3 have data
+    quizzes = existing_user.get("quizzes", {})
+
+    missing_quizzes = []
+    if "1" not in quizzes or not quizzes["1"]:
+        missing_quizzes.append("Quiz 1")
+    if "2" not in quizzes or not quizzes["2"]:
+        missing_quizzes.append("Quiz 2")
+    if "3" not in quizzes or not quizzes["3"]:
+        missing_quizzes.append("Quiz 3")
+
+    if missing_quizzes:
+        return {"message": "Please attempt the following quizzes:", "quizzes_to_attempt": missing_quizzes}
+
+    # Get the last attempt for quiz 1, 2, and 3
+    last_attempt_1 = quizzes["1"][str(len(quizzes["1"]))]
+    last_attempt_2 = quizzes["2"][str(len(quizzes["2"]))]
+    last_attempt_3 = quizzes["3"][str(len(quizzes["3"]))]
+
+    # Extract the relevant inputs from the last attempts
+    counting_input = [(last_attempt_1["average_result"] / 100)]
+    color_input = [(last_attempt_2["average_result"] / 100)]
+    calculation_input = [(last_attempt_3["average_result"] / 100)]
+
+    # Apply the fuzzy logic to predict the percentage
+    prediction_result = apply_fuzzy_logic(counting_input, color_input, calculation_input, fuzzy_ctrl)
+    existing_prediction = predicted_values_collection.find_one({"uid": uid})
+
+    if existing_prediction:
+        # Safely append the new prediction to the existing dictionary
+        predicted_values = existing_prediction["predicted_values"]
+        next_index = str(len(predicted_values) + 1)  # Increment safely
+        predicted_values[next_index] = prediction_result
+
+        predicted_values_collection.update_one(
+            {"uid": uid},
+            {"$set": {"predicted_values": predicted_values}}
+        )
+    else:
+        # Create a new dictionary entry for a new UID
+        new_prediction_data = {
+            "uid": uid,
+            "predicted_values": {
+                "1": prediction_result  # Start with the first prediction
+            }
+        }
+        predicted_values_collection.insert_one(new_prediction_data)
+
+    return {"message": "Prediction successful", "result": prediction_result}
+
+
+#GET PREDICTION
+@router.get("/prefdiction_tables")
+async def get_prediction_data():
+    print("hello")
