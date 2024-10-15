@@ -243,3 +243,8 @@ async def predict_dyscalculia(data: dict):
 @router.get("/prefdiction_tables")
 async def get_prediction_data():
     print("hello")
+
+#RESULT HISTORY
+
+
+#GET USER DETAILS
