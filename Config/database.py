@@ -16,7 +16,7 @@ client = MongoClient(
 )
 
 # Access the specified database
-db = client[db_name]
+db = client.dyscalculia
 
 # Define the collections you will be working with
 user_registration_collection = db["UserRegistrations"]
