@@ -7,6 +7,14 @@ from Config.database import user_registration_collection, user_profile_collectio
 from bson import ObjectId
 import re
 import uuid
+from dotenv import load_dotenv
+import os
+from datetime import datetime, timedelta
+
+
+from Models.User_Profile import User_Profile
+
+
 
 router = APIRouter()
 
@@ -67,8 +75,7 @@ async def login_user(user: dict):
         {"username": username})
 
     if db_user and db_user["password"] == password:
-        user_id = db_user["uid"]
-        return {"message": "Login successful!", "user_id": user_id}
+        return {"message": "Login successful!", "uid": db_user["uid"]}
     else:
         raise HTTPException(status_code=400, detail="Invalid email or password.")
 
@@ -77,7 +84,7 @@ async def login_user(user: dict):
 @router.post("/profile")
 async def post_user_details(user: dict):
     # Find user by email in the UserRegistrations collection
-    existing_user = user_registration_collection.find_one({"email": user.get("email")})
+    existing_user = user_registration_collection.find_one({"uid": user.get("uid")})
 
     if not existing_user:
         raise HTTPException(status_code=404, detail="User not found. Please register first.")
@@ -101,6 +108,8 @@ async def post_user_details(user: dict):
     user_profile_collection.insert_one(profile_data)
 
     return {"message": "User profile created successfully!", "uid": uid}
+
+
 
 
 # SCORES
@@ -239,12 +248,99 @@ async def predict_dyscalculia(data: dict):
     return {"message": "Prediction successful", "result": prediction_result}
 
 
-#GET PREDICTION
-@router.get("/prefdiction_tables")
-async def get_prediction_data():
-    print("hello")
+@router.post("/prediction_tables")
+async def get_prediction_data(data: dict):
+    # Fetch the prediction data from the predicted_values_collection based on uid
+    prediction_data = predicted_values_collection.find_one({"uid": data.get("uid")})
 
-#RESULT HISTORY
+    # Check if the uid exists in the collection
+    if not prediction_data:
+        raise HTTPException(status_code=404, detail="No predictions found for the given uid.")
+    
+    # Return the predicted values
+    return {
+        "uid": data.get("uid"),
+        "predicted_values": prediction_data.get("predicted_values", {})
+    }
 
 
-#GET USER DETAILS
+
+
+
+
+@router.post("/user_details")
+async def get_user_details(data: dict):
+    
+    user_profile = user_profile_collection.find_one({"uid": data.get("uid")})
+    
+    
+    # Log the result from the database query
+    if user_profile:
+        print(f"User profile found: {user_profile}")
+    else:
+        print("User profile not found in the database.")
+    
+    # Check if the user exists in the collection
+    if not user_profile:
+        raise HTTPException(status_code=404, detail="User profile not found.")
+    
+    # Convert _id to string to avoid BSON issues
+    user_profile['_id'] = str(user_profile['_id'])  # Convert ObjectId to string
+
+    # Map MongoDB result to Pydantic model fields
+    user_profile_data = User_Profile(
+        uid=user_profile['uid'],
+        child_name=user_profile['child_name'],
+        child_age=user_profile['child_age'],
+        child_gender=user_profile['child_gender'],
+        parent_name=user_profile['parent_name'],
+        parent_contact=user_profile['parent_contact'],
+        address=user_profile['address'],
+        preferred_subject=user_profile['preferred_subject']
+    )
+
+    
+    return user_profile
+
+
+
+@router.post("/result_history")
+async def get_result_history(data: dict):
+    # Fetch the user's quiz data from the quiz_collection
+    existing_user = quiz_collection.find_one({"uid": data.get("uid")})
+
+    # Check if the user exists and has quiz data
+    if not existing_user or 'quizzes' not in existing_user:
+        raise HTTPException(status_code=404, detail="User quiz data not found.")
+
+    quizzes = existing_user.get("quizzes", {})
+
+    # Initialize lists to store average results for counting, coloring, and calculation quizzes
+    counting_results = []
+    coloring_results = []
+    calculation_results = []
+
+    # Check and extract results for each quiz (1, 2, 3 representing counting, coloring, calculation)
+    if "1" in quizzes:  # Quiz 1: Counting
+        for attempt_num, attempt_data in quizzes["1"].items():
+            counting_results.append(attempt_data["average_result"])
+
+    if "2" in quizzes:  # Quiz 2: Coloring
+        for attempt_num, attempt_data in quizzes["2"].items():
+            coloring_results.append(attempt_data["average_result"])
+
+    if "3" in quizzes:  # Quiz 3: Calculation
+        for attempt_num, attempt_data in quizzes["3"].items():
+            calculation_results.append(attempt_data["average_result"])
+
+    # Return the results as three lists
+
+    results = {
+        "counting_results": counting_results,
+        "coloring_results": coloring_results,
+        "calculation_results": calculation_results
+    }
+
+    return results
+
+
