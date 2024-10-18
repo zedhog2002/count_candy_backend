@@ -7,11 +7,10 @@ username = quote_plus(os.getenv("MONGO_USERNAME"))
 password = quote_plus(os.getenv("MONGO_PASSWORD"))
 db_name = os.getenv("MONGO_DB_NAME")
 mongo_url = os.getenv("MONGO_URL")
-
 # Create the MongoDB client using environment variables
 try:
     client = MongoClient(
-        f"mongodb+srv://{username}:{password}@{mongo_url}/?retryWrites=true&w=majority&appName={db_name}",
+        f"mongodb+srv://krssn:{password}@dyslexia.9bswy.mongodb.net/?retryWrites=true&w=majority&appName=Dyslexia",
         tls=True,  # Use TLS for encryption
         tlsAllowInvalidCertificates=True  # Optionally allow invalid certs
     )
