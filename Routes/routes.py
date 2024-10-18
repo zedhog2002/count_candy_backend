@@ -2,8 +2,7 @@ import pickle
 import numpy as np
 from skfuzzy import control as ctrl
 from fastapi import APIRouter, HTTPException
-from Config.database import user_registration_collection, user_profile_collection, quiz_collection, \
-    questions_collection, predicted_values_collection  # Updated collection names
+from Config.database import user_registration_collection, user_profile_collection, quiz_collection,predicted_values_collection  # Updated collection names
 from bson import ObjectId
 import re
 import uuid
