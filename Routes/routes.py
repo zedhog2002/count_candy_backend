@@ -13,40 +13,44 @@ from datetime import datetime, timedelta
 
 from Models.User_Profile import User_Profile
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
 
-# Regex patterns
 email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
 password_regex = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
 
-
-# REGISTER
+# REGISTER endpoint
 @router.post("/register")
 async def post_user(user: dict):
     # Validate email format
     if not re.match(email_regex, user.get('email', '')):
+        logger.error(f"Invalid email format for email: {user.get('email')}")
         raise HTTPException(status_code=400, detail="Invalid email format.")
 
     # Validate password complexity
     if not re.match(password_regex, user.get('password', '')):
-        raise HTTPException(status_code=400,
-                            detail="Password does not meet complexity requirements. It must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special symbol.")
+        logger.error(f"Password does not meet complexity requirements for user: {user.get('email')}")
+        raise HTTPException(status_code=400, detail="Password does not meet complexity requirements. It must contain at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special symbol.")
 
     # Check if passwords match
     if user.get('password') != user.get('confirm_password'):
+        logger.error(f"Passwords do not match for user: {user.get('email')}")
         raise HTTPException(status_code=400, detail="Passwords do not match.")
 
-    # Check if the email is already in the database (ensuring uniqueness)
+    # Check if the email is already in the database
     existing_user = user_registration_collection.find_one({"email": user.get("email")})
     if existing_user:
+        logger.error(f"Email already exists for email: {user.get('email')}")
         raise HTTPException(status_code=400, detail="Email already exists. Please use a different email.")
 
     # Generate a unique UID
     uid = str(uuid.uuid4())
 
-    # Construct user data with uid
+    # Construct user data
     user_data = {
         "uid": uid,
         "username": user.get('username'),
@@ -58,8 +62,9 @@ async def post_user(user: dict):
     # Insert the user data into the collection
     user_registration_collection.insert_one(user_data)
 
-    return {"message": "User successfully registered!", "uid": uid}
+    logger.info(f"User successfully registered with UID: {uid}")
 
+    return {"message": "User successfully registered!", "uid": uid}
 
 # LOGIN
 @router.post("/login")
