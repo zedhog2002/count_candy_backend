@@ -1,3 +1,4 @@
+import logging
 import pickle
 import numpy as np
 from skfuzzy import control as ctrl
